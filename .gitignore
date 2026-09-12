@@ -1,0 +1,16 @@
+```
+# Virtual environment
+.venv/
+
+# PyCharm metadata
+.idea/
+
+# VS Code
+.vscode/
+
+# Python cache &amp; bytecode
+__pycache__/
+*.py[cod]
+
+# Environment variables &amp; secrets (CRITICAL for OpenAI keys)
+.env
