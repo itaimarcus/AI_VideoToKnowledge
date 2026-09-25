@@ -1,5 +1,6 @@
 """YouTube Video ID Extractor module."""
 import re
+from ai_video_to_knowledge.exceptions import ExtractorError
 
 YOUTUBE_URL_REGEX = re.compile(
     r'(?:https?://)?(?:www\.|m\.)?(?:youtube\.com/(?:watch\?v=|embed/|v/|shorts/)|youtu\.be/)([\w-]{11})'
@@ -13,17 +14,17 @@ def extract_video_id(url: str) -> str:
         The 11-character YouTube video ID.
     Raises:
         TypeError: If input is not a string.
-        ValueError: If input string is empty or contains an invalid YouTube URL.
+        ExtractorError: If input string is empty or contains an invalid YouTube URL.
     """
     if not isinstance(url, str):
         raise TypeError(f"Expected string for URL, got {type(url).__name__}")
         
     cleaned_url = url.strip()
     if not cleaned_url:
-        raise ValueError("URL string cannot be empty or whitespace only.")
+        raise ExtractorError("URL string cannot be empty or whitespace only.")
 
     match = YOUTUBE_URL_REGEX.search(cleaned_url)
     if not match:
-        raise ValueError(f"Could not extract YouTube Video ID from URL: '{url}'")
+        raise ExtractorError(f"Could not extract YouTube Video ID from invalid URL: '{url}'")
         
     return match.group(1)

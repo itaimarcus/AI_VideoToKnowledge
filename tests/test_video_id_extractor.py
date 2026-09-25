@@ -1,7 +1,7 @@
 """Unit tests for youtube_summary.extractor using pytest."""
 import pytest
-from ai_video_to_knowledge.extractor import extract_video_id
-
+from ai_video_to_knowledge.exceptions import ExtractorError
+from ai_video_to_knowledge.video_id_extractor import extract_video_id
 
 # ---------------------------------------------------------------------------
 # 1. Valid URL Tests (Parametrized)
@@ -28,23 +28,20 @@ def test_valid_urls_parametrized(url: str, expected_id: str) -> None:
 # ---------------------------------------------------------------------------
 
 @pytest.mark.parametrize(
-    "invalid_url",
+    "invalid_url, expected_message",
     [
-        "invalid_url_string",
-        "",
-        "   ",
-        "https://vimeo.com/123456789",
-        "https://youtube.com/watch?v=shortID",
+        ("invalid_url_string", "Could not extract YouTube Video ID from invalid URL: 'invalid_url_string'"),
+        ("", "URL string cannot be empty or whitespace only."),
+        (" ", "URL string cannot be empty or whitespace only."),
+        ("https://vimeo.com/123456789", "Could not extract YouTube Video ID from invalid URL: 'https://vimeo.com/123456789'"),
+        ("https://youtube.com/watch?v=shortID", "Could not extract YouTube Video ID from invalid URL: 'https://youtube.com/watch?v=shortID'"),
     ],
 )
-def test_invalid_urls_raise_value_error(invalid_url: str) -> None:
-    """Ensures all invalid URLs raise ValueError with descriptive error messages."""
-    with pytest.raises(ValueError) as exc_info:
+def test_invalid_urls_raise_extractor_error(invalid_url: str, expected_message: str) -> None:
+    """Ensures all invalid URLs raise ExtractorError with descriptive error messages."""
+    with pytest.raises(ExtractorError) as exc_info:
         extract_video_id(invalid_url)
-    
-    # Verify the exception message is clear and descriptive
-    err_msg = str(exc_info.value)
-    assert ("Could not extract" in err_msg) or ("cannot be empty" in err_msg)
+    assert str(exc_info.value) == expected_message
 
 
 # ---------------------------------------------------------------------------

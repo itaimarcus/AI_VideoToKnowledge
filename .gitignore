@@ -13,3 +13,8 @@ __pycache__/
 
 # Environment variables &amp; secrets (CRITICAL for OpenAI keys)
 .env
+
+ROADMAP.md
+temp/
+
+*.egg-info/
