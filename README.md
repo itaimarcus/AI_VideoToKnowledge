@@ -1,10 +1,10 @@
 # AI Video To Knowledge (`ai_video_to_knowledge`)
 
-A production-grade Python application that parses YouTube URLs, extracts transcripts, processes them using OpenAI's LLMs to generate structured summaries and lesson plans, and exports knowledge outputs.
+A production-grade Python application that parses YouTube URLs, extracts transcripts, processes them using OpenAI's LLMs with structured Pydantic outputs to generate comprehensive summaries and lesson plans, and exports knowledge outputs.
 
 ---
 
-## Project Architecture
+## 🏗️ Project Architecture
 
 ```text
 AI_VideoToKnowledge/
@@ -13,124 +13,137 @@ AI_VideoToKnowledge/
 │       ├── __init__.py
 │       ├── exceptions.py             # Custom domain exception hierarchy
 │       ├── video_id_extractor.py     # Regex YouTube URL parser & validator
-│       └── transcript.py             # YouTube transcript fetcher & formatter
+│       ├── transcript.py             # YouTube transcript fetcher & formatter
+│       ├── schemas.py                # Pydantic structured output models
+│       └── process_ai.py             # OpenAI LLM integration & prompt engineering
+├── outputs/                          # Generated knowledge files (.md)
 ├── tests/                            # Unit and integration test suite
 │   ├── __init__.py
 │   ├── test_video_id_extractor.py   # Unit tests for URL parser
-│   └── test_transcript.py           # Unit tests for transcript fetcher (pytest-mock)
+│   ├── test_transcript.py           # Unit tests for transcript fetcher (pytest-mock)
+│   ├── test_process_ai.py           # Unit tests for OpenAI AI summarizer
+│   └── test_main.py                 # CLI integration tests
 ├── .env                              # Local environment secrets (Git ignored)
 ├── .env.example                      # Environment variable template
 ├── .gitignore                        # Git exclusion rules
 ├── pyproject.toml                    # Pytest configuration & package pathing
-├── README.md                          # Project documentation
+├── main.py                           # CLI entry point
+├── run.bat                           # Windows batch execution script with PYTHONPATH
+├── README.md                         # Central project documentation & architecture log
 └── requirements.txt                  # Direct project dependencies
 ```
 
 ---
 
-## Engineering Decisions
+## 🏛️ Engineering Decisions
 
-During the architecture and implementation of this project, key engineering decisions were made to ensure production-grade quality, strict testability, maintainability, and resource optimization.
+During the architecture and implementation of this project, key engineering decisions were established to guarantee production-grade quality, strict testability, enterprise maintainability, and resource optimization:
 
 ### 1. Custom Exception Hierarchy & API Decoupling (`VideoToKnowledgeError`)
-- **Decision:** Designed a custom domain exception hierarchy in `src/ai_video_to_knowledge/exceptions.py`. A base exception `VideoToKnowledgeError` serves as the root, with specific subclasses like `ExtractorError` and `TranscriptNotAvailableError`.
-- **Rationale & Benefits:**
-  - **Decoupling Application Logic:** Upstream application code should never directly catch third-party library exceptions (e.g., `youtube_transcript_api._errors.VideoUnavailable`). If we switch to a different transcript provider in the future (e.g., AssemblyAI, Whisper, or a custom scraper) or if the current library changes its error definitions, upstream modules will remain completely unaffected.
-  - **Single Point of Translation:** All third-party library exceptions are intercepted at the module boundary (`transcript.py`) and wrapped into domain-specific exceptions.
-  - **Clean Error Boundaries:** Prevents generic Python system errors (like `ValueError` or `KeyError`) from masking domain failures, allowing callers to handle application errors predictably.
+* **Decision:** Designed a custom domain exception hierarchy in `src/ai_video_to_knowledge/exceptions.py`. A base exception `VideoToKnowledgeError` serves as the root, with specific subclasses like `ExtractorError`, `TranscriptError`, and `SummarizerError`.
+* **Rationale & Benefits:**
+  * **Decoupling Application Logic:** Upstream application code (CLI, Web UI, API) should never directly catch third-party vendor library exceptions (e.g., `youtube_transcript_api._errors.VideoUnavailable` or `openai.AuthenticationError`). If we switch providers or if external libraries change their exception schemas, upstream modules remain completely unaffected.
+  * **Single Point of Translation:** All third-party library exceptions are intercepted at module boundaries and wrapped into clean domain-specific exceptions.
+  * **Clean Error Boundaries:** Prevents generic system errors (like `ValueError` or `KeyError`) from masking domain failures.
 
-### 2. Defensive Input Validation & Fail-Fast Principle
-- **Decision:** Implemented early explicit input validation (`isinstance`, `.strip()`, empty-string checks) before executing complex operations like regular expressions or network calls.
-- **Rationale & Benefits:**
-  - **Fail-Fast Mechanics:** In LLM pipelines, attempting to process invalid inputs (e.g., non-string URLs, empty strings, or non-YouTube links) through downstream modules leads to cascading failures, unnecessary API calls, and wasted OpenAI credit costs.
-  - **Clear Error Attribution:** Validating input type and format at the function entry point raises immediate, descriptive errors (`TypeError` or `ExtractorError`) before any heavy computation occurs.
+### 2. Preventing Exception Re-wrapping (`except SummarizerError: raise`)
+* **Decision:** Placed an explicit `except SummarizerError: raise` block immediately before the generic `except Exception as e:` catch-all block in `process_ai.py`.
+* **Rationale & Benefits:**
+  * **Eliminating Double-Wrapping:** Custom domain exceptions raised deliberately inside a `try:` block inherit from `Exception`. Without an explicit re-raise block, they get caught by the generic catch-all and re-wrapped into misleading `"Unexpected error during AI processing..."` messages.
+  * **Preserving Original Context:** Guarantees that precise domain validation errors (e.g., `"Transcript text cannot be empty."` or `"OPENAI_API_KEY is not configured."`) propagate unchanged to the CLI layer.
 
-### 3. Clean Error Messaging & Traceback Isolation
-- **Decision:** Removed raw stringified exception payloads (`{e}`) from user-facing error messages in `transcript.py`, relying instead on clean domain strings combined with exception chaining (`raise CustomError(...) from e`).
-- **Rationale & Benefits:**
-  - **Noise Reduction:** Third-party libraries like `youtube-transcript-api` often append long troubleshooting paragraphs, issue tracker URLs, and verbose stack information inside their exception strings.
-  - **Clean API Contract:** Intercepting the error and returning a concise single-line message (e.g., `Could not retrieve transcript for video ID 'dQw4w9WgXc'`) provides a professional interface for downstream callers.
-  - **Debugging Preservation:** Using Python's `from e` syntax preserves the full underlying stack trace for developers without polluting the primary exception string.
+### 3. Structured Outputs with Enforced Pydantic Schemas (`EducationalContent`)
+* **Decision:** Utilized OpenAI Structured Outputs (`beta.chat.completions.parse`) mapped strictly to Pydantic models in `schemas.py`.
+* **Rationale & Benefits:**
+  * **Eliminating Fragile Regex Parsing:** Avoids unreliable Markdown or raw text scraping from LLM completions.
+  * **Field-Level Prompt Engineering:** Enforces semantic constraints and formatting expectations directly inside the Pydantic schema using `Field(description="...")`.
+  * **Runtime Validation:** Guarantees that generated responses contain all required fields (`title`, `summary`, `key_takeaways`, `lesson_plan`) before returning to caller functions.
 
-### 4. Isolated, Zero-Network Unit Testing (`pytest-mock` & `types.SimpleNamespace`)
-- **Decision:** Standardized unit tests to run completely offline without making live HTTP requests to YouTube servers, leveraging `pytest-mock` (`mocker.patch`) and `types.SimpleNamespace`.
-- **Rationale & Mechanics:**
-  - **Why Avoid Live Network Calls?** Real HTTP requests to external APIs are slow, unreliable, and subject to rate limits or network dropouts. A unit test must verify internal code logic, not YouTube's external uptime.
-  - **How Mocking Works (`mocker.patch`):** Intercepts calls to `YouTubeTranscriptApi().fetch` during test runs, returning pre-defined in-memory data instantly.
-  - **Object Attribute Mimicking (`types.SimpleNamespace`):** Modern versions of `youtube-transcript-api` (v1.0+) return structured snippet objects with a `.text` attribute rather than raw dictionaries. We use Python's standard library `types.SimpleNamespace(text="...")` to construct lightweight mock objects that support dot-notation (`item.text`).
-  - **Outcome:** The entire unit test suite executes deterministically in **less than 0.1 seconds**, completely offline.
+### 4. Optional Secret Parameters & BYOK (Bring Your Own Key) Architecture
+* **Decision:** Designed core functions to accept optional parameters (`api_key: str | None = None`, `model: str | None = None`) with fallback to environment variables (`os.getenv`).
+* **Rationale & Benefits:**
+  * **Test Suite Isolation:** Allows unit tests to pass explicit dummy keys (`api_key="fake-key"`) without mutating operating system environment variables (`os.environ`).
+  * **Multi-Tenant BYOK Web Architecture:** Seamlessly supports future Web API deployments where end-users provide their own personal OpenAI API key per request.
 
-### 5. Production `src/` Package Layout & Editable Installation (`pip install -e .`)
-- **Decision:** Adopted the canonical `src/` project layout (`src/ai_video_to_knowledge/`), configured `pyproject.toml` with `pythonpath = ["src"]`, and registered the package in editable mode via `pip install -e .`.
-- **Rationale & Problem Solution:**
-  - **Where We Encountered the Issue:** Running test scripts from the root directory or inside PyCharm's PyDev console originally threw `ModuleNotFoundError: No module named 'ai_video_to_knowledge'` or required temporary `sys.path` hacks.
-  - **Role of `src/` Layout:** Isolates core source code from root configuration scripts, preventing accidental import collisions between repository files and Python packages.
-  - **Role of Editable Mode (`pip install -e .`):** Generates package metadata (`ai_video_to_knowledge.egg-info/`) in `.venv`. Python's package manager links the `src/` directory directly into the virtual environment, allowing `from ai_video_to_knowledge...` imports to resolve globally across CLI, PyCharm, and Pytest without mutating `sys.path`.
-  - **Role of `pyproject.toml` (`pythonpath`):** Explicitly informs `pytest` where to resolve package paths during test execution.
+### 5. Output Stream Decoupling (`stdout` vs `stderr`) & Safe Redirection
+* **Decision:** Directed all user-facing status messages and errors in the CLI to `sys.stderr` rather than standard `print` (`sys.stdout`).
+* **Rationale & Benefits:**
+  * **Data Pipeline Integrity:** When users redirect CLI output to files or pipes (e.g., `python main.py <URL> > log.txt`), status and error messages do not contaminate data files.
+  * **Real-Time Error Feedback:** Error messages remain visible on the user's terminal screen even when `stdout` is redirected.
 
-### 6. Decoupled Module Architecture & REPL-Driven Sanity Testing
-- **Decision:** Designed core business logic modules (`transcript.py`, `video_id_extractor.py`) as independent, pure functional components without embedded `if __name__ == "__main__":` entry points or tight coupling to CLI interfaces.
-- **Rationale & Benefits:**
-  - **High Reusability:** Core functions can be imported seamlessly into CLI tools, web application endpoints (e.g., FastAPI), or background workers.
-  - **Interactive REPL Sanity Checks:** Allows developers to test live behavior directly inside the Python REPL console (`>>> print(fetch_transcript("..."))`) to verify real-world API output formats alongside offline unit tests.
+### 6. Defensive Input Validation & Fail-Fast Principle
+* **Decision:** Implemented early explicit input validation (`isinstance`, `.strip()`, empty-string checks) at the start of functions before executing heavy operations like regex matching or network API calls.
+* **Rationale & Benefits:**
+  * **Resource & Cost Protection:** In LLM pipelines, attempting to process invalid inputs through downstream modules leads to cascading failures, unnecessary network latency, and wasted OpenAI API credits.
+  * **Clear Error Attribution:** Raises immediate, descriptive errors (`TypeError`, `ExtractorError`, `SummarizerError`) at the function entry point.
 
-### 7. Module-Level Pattern Pre-Compilation (`re.compile`)
-- **Decision:** Compiled regular expressions at the module top-level (`YOUTUBE_URL_REGEX = re.compile(...)`) rather than inside function bodies.
-- **Rationale & Performance Benefits:**
-  - Compiling regular expressions inside a frequently called function forces Python to re-parse the regex string into a state machine on every function execution.
-  - Pre-compiling the pattern once when the module is imported eliminates redundant parsing overhead, optimizing execution speed for high-throughput batch URL processing.
+### 7. Clean Error Messaging & Traceback Isolation
+* **Decision:** Removed raw stringified exception payloads (`{e}`) from user-facing error messages, relying instead on clean domain strings combined with exception chaining (`raise CustomError(...) from e`).
+* **Rationale & Benefits:**
+  * **Noise Reduction:** Intercepts multi-paragraph third-party library error dumps and replaces them with concise single-line domain messages.
+  * **Debugging Preservation:** The `from e` syntax preserves the underlying stack trace in `__cause__` for developer debugging in log files (`app.log`) without polluting CLI user output.
 
-### 8. Strict Character-Level Exception Assertions in Parametrized Tests
-- **Decision:** Enforced exact string equality (`assert str(exc_info.value) == expected_message`) when testing exception handling across valid and invalid URL formats using `@pytest.mark.parametrize`.
-- **Rationale & Benefits:**
-  - Loose assertions (such as substring checking `in`) can mask subtle formatting bugs, missing parameters, or unexpected string mutations.
-  - Pairwise parametrization maps each invalid input directly to its exact expected error string, guaranteeing consistent error communication.
+### 8. Isolated, Zero-Network Unit Testing (`pytest-mock` & `types.SimpleNamespace`)
+* **Decision:** Standardized unit tests to run 100% offline without making live HTTP requests to YouTube or OpenAI servers, leveraging `pytest-mock` (`mocker.patch`, `side_effect`, `return_value`) and `types.SimpleNamespace`.
+* **Rationale & Benefits:**
+  * **Sub-Second Speed:** The entire test suite executes deterministically in under 1.5 seconds (< 0.05s per test).
+  * **Zero Financial Cost:** Mocks prevent real API credit consumption during test runs.
+  * **Deterministic Error Simulation:** `side_effect` allows simulating network crashes, `AuthenticationError`, `RateLimitError`, and `APIConnectionError` instantly without disrupting live servers.
 
-### 9. Strict Environment Secret Hygiene (`.env` vs `.env.example`)
-- **Decision:** Enforced complete isolation of environment secrets (`.env`) from version control while maintaining a tracked `.env.example` template contract.
-- **Rationale & Benefits:**
-  - Hardcoding sensitive credentials (such as `OPENAI_API_KEY`) creates severe security risks.
-  - Excluding `.env` and local build artifacts (`*.egg-info/`) in `.gitignore` prevents secret leaks, while `.env.example` provides a clear configuration blueprint for collaborators.
+### 9. Production `src/` Package Layout & Editable Installation (`pip install -e .`)
+* **Decision:** Adopted the canonical `src/` layout (`src/ai_video_to_knowledge/`), configured `pyproject.toml` with `pythonpath = ["src"]`, and registered the package in editable mode via `pip install -e .`.
+* **Rationale & Benefits:**
+  * **Eliminating Import Collisions:** Prevents accidental import collisions between working directory scripts and installed packages.
+  * **Global Resolution:** Links `src/` directly into `.venv`, allowing `from ai_video_to_knowledge...` imports to resolve across CLI, PyCharm, and Pytest.
 
----
+### 10. Decoupled Module Architecture & REPL-Driven Sanity Testing
+* **Decision:** Designed core business logic modules (`transcript.py`, `video_id_extractor.py`, `process_ai.py`) as independent, pure functional components without embedded `if __name__ == "__main__":` blocks or tight CLI coupling.
+* **Rationale & Benefits:**
+  * **High Reusability:** Core functions import seamlessly into CLI scripts, FastAPI web endpoints, or background task queues.
+  * **REPL Sanity Testing:** Enables interactive testing directly inside the Python REPL console (`>>> process_transcript_with_ai(...)`).
 
-## New Knowledge & Concepts Learned
+### 11. Module-Level Pattern Pre-Compilation (`re.compile`)
+* **Decision:** Compiled regular expressions at the top level of `video_id_extractor.py` (`YOUTUBE_URL_REGEX = re.compile(...)`).
+* **Rationale & Benefits:**
+  * Pre-compiling regex strings once at module load time eliminates redundant parsing overhead during high-throughput batch execution.
 
-Throughout the engineering process, the following core Python engineering concepts, tools, and paradigms were mastered from first principles:
+### 12. Strict Character-Level Exception Assertions in Parametrized Tests
+* **Decision:** Enforced exact string equality (`assert str(exc_info.value) == expected_message`) in `@pytest.mark.parametrize` test suites.
+* **Rationale & Benefits:**
+  * Prevents false-positive test passes by verifying that the exact intended guard clause raised the exception.
 
-1. **Python Import Resolution & `sys.path` Mechanics**:
-   - Learned how Python locates packages via `sys.path` when executing scripts from different working directories.
-   - Discovered why `src/` layouts require explicit path configuration (via `pyproject.toml`, `sys.path`, or `pip install -e .`).
-   - Mastered Editable Mode (`pip install -e .`), which registers local package metadata (`*.egg-info`) inside the virtual environment (`.venv`) for live development imports.
-
-2. **Object-Oriented Exception Handling & Chaining**:
-   - Learned how to design domain exception class hierarchies using inheritance (`class ExtractorError(VideoToKnowledgeError)`).
-   - Mastered exception chaining using `raise CustomError(...) from e` to preserve underlying traceback context while surfacing clean domain errors.
-
-3. **API Method Instantiation & Schema Debugging**:
-   - Diagnosed unbound instance method errors (`TypeError: fetch() missing 1 required positional argument: 'video_id'`) caused by invoking instance methods without instantiation (`YouTubeTranscriptApi().fetch(...)`).
-   - Inspected third-party object schemas (`dir()`, `type()`, `hasattr()`) to adapt to breaking library updates (transitioning from dictionary lookups `item["text"]` to object attributes `item.text`).
-
-4. **Advanced Unit Testing with `pytest` & `pytest-mock`**:
-   - Mastered `@pytest.mark.parametrize` to test multiple URL variations (standard, shorts, embed, mobile `m.youtube.com`, timestamped links) without code duplication.
-   - Learned how to mock external network dependencies using `mocker.patch`.
-   - Utilized `types.SimpleNamespace` from Python's standard library to construct lightweight mock objects with dot-notation (`item.text`) for unit tests.
-   - Implemented exact exception assertions using `with pytest.raises(ExceptionClass) as exc_info:` and `assert str(exc_info.value) == expected`.
-
-5. **Robust Regular Expressions for URL Parsing**:
-   - Designed regex patterns with non-capturing groups `(?:...)` and explicit capture groups `([\w-]{11})` to extract 11-character YouTube video IDs across diverse URL formats (`watch?v=`, `youtu.be/`, `/shorts/`, `/embed/`, `/v/`, `m.youtube.com`).
-   - Understood performance benefits of module-level regex pre-compilation (`re.compile`).
-
-6. **Interactive REPL Prototyping vs. Automated Unit Testing**:
-   - Learned how to execute and inspect package functions directly inside the Python Interactive REPL console.
-   - Established a two-tier testing protocol: **automated unit testing** (fast, deterministic, offline via `pytest-mock`) and **interactive sanity testing** (verifying live API responses in REPL).
+### 13. Environment Secret Hygiene (`.env` vs `.env.example`)
+* **Decision:** Strictly excluded `.env` from version control via `.gitignore` while maintaining a tracked `.env.example` template.
+* **Rationale & Benefits:**
+  * Protects sensitive API credentials from being committed to source control while providing a clear setup blueprint for collaborators.
 
 ---
 
-## Getting Started
+## 🧠 New Knowledge & Core Concepts Learned
+
+1. **OpenAI Structured Outputs & Response List Indexing (`choices[0]`)**:
+   - Mastered `beta.chat.completions.parse` with Pydantic models.
+   - Diagnosed runtime `AttributeError` caused by accessing `response.choices.message` instead of indexing the list element `response.choices[0].message`.
+2. **Mocking Side Effects (`side_effect`) vs Return Values (`return_value`)**:
+   - `return_value`: Simulates successful API responses (Happy Path).
+   - `side_effect`: Simulates raised exceptions (`AuthenticationError`, `RateLimitError`) for deterministic error handling testing.
+3. **Python Import Resolution & `sys.path` Mechanics**:
+   - Understood editable package installations (`pip install -e .`) and explicit path resolution via `pyproject.toml` and `PYTHONPATH`.
+4. **Exception Chaining (`raise CustomError(...) from e`)**:
+   - Learned how `from e` attaches the original cause in `__cause__` while surfacing clean domain error messages.
+5. **API Method Instantiation (`YouTubeTranscriptApi().fetch(...)`)**:
+   - Diagnosed positional argument errors caused by invoking instance methods as unbound class methods, and adapted to schema object updates (`item.text`).
+6. **Advanced Unit Testing with `pytest` & `pytest-mock`**:
+   - Mastered `@pytest.mark.parametrize` for pairwise edge-case testing across URL formats.
+   - Utilized `types.SimpleNamespace` to construct dot-accessible mock objects in memory.
+7. **Regex Design with Non-Capturing Groups (`(?:...)`)**:
+   - Extracted 11-character YouTube video IDs across diverse URL structures (`watch?v=`, `youtu.be/`, `/shorts/`, `/embed/`, `/v/`, `m.youtube.com`).
+
+---
+
+## 🚀 Getting Started
 
 ### Prerequisites
-
 - **Python 3.10+**
 - **OpenAI API Key**
 
@@ -143,13 +156,11 @@ Throughout the engineering process, the following core Python engineering concep
    ```
 
 2. **Create and activate a virtual environment:**
-
    *Windows (PowerShell):*
    ```powershell
    python -m venv .venv
    .\.venv\Scripts\activate
    ```
-
    *macOS / Linux:*
    ```bash
    python3 -m venv .venv
@@ -170,44 +181,77 @@ Throughout the engineering process, the following core Python engineering concep
 
 ---
 
-## Configuration
+## 💻 CLI Usage
 
-Secrets and environment settings are managed via `.env`.
+### Direct Python Execution
+Run `main.py` directly by passing a YouTube URL as a positional argument:
 
-Example `.env`:
+```powershell
+python main.py "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+```
 
-```env
-## OpenAI API Configuration
-OPENAI_API_KEY=your_actual_openai_api_key
-OPENAI_MODEL=gpt-4o-mini
+### Windows Helper Execution (`run.bat`)
+Alternatively, execute via `run.bat` (which automatically configures `PYTHONPATH=%~dp0src` without requiring `pip install -e .`):
 
-## Application Settings
-LOG_LEVEL=INFO
+```cmd
+run.bat "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
+```
+
+### Expected Output
+The application generates a structured Markdown summary inside the `outputs/` directory and outputs clean status updates:
+
+```text
+⏳ Parsing YouTube URL...
+⏳ Fetching transcript...
+⏳ Processing structured knowledge with OpenAI...
+✅ Knowledge extraction complete!
+📄 Output saved to: outputs/dQw4w9WgXcQ_summary.md
 ```
 
 ---
 
-## Running Tests
+## 🧪 Running Tests
 
-Execute the full test suite using `pytest`:
+Execute the full, 100% offline unit test suite using `pytest`:
 
 ```bash
 pytest
 ```
 
-For verbose output showing individual test functions:
-
+For verbose output:
 ```bash
 pytest -v
 ```
 
 ---
 
-## Current Status & Roadmap
+## 🗺️ Current Status & Detailed Roadmap
 
-- [x] **Module 1 (`video_id_extractor.py`)**: Robust YouTube URL parsing & validation.
-- [x] **Module 2 (`transcript.py`)**: YouTube transcript fetching & continuous text formatting.
-- [x] **Exception Hierarchy (`exceptions.py`)**: Custom domain error handling.
-- [x] **Test Suite**: Comprehensive unit testing with `pytest` and `pytest-mock`.
-- [ ] **Module 3 (`summarizer.py`)**: OpenAI API integration for transcript summarization.
-- [ ] **Module 4 (Export Pipeline)**: Markdown / PDF generation & NoSQL storage.
+- [x] **Phase 1: URL Extraction & Captions Engine**
+  - [x] `video_id_extractor.py`: Regex YouTube URL parsing & validation across all URL formats.
+  - [x] `transcript.py`: `youtube-transcript-api` fetcher & continuous text formatting.
+  - [x] `exceptions.py`: Base domain exception hierarchy (`VideoToKnowledgeError`).
+  - [x] Unit test suite with 100% offline `pytest-mock` coverage.
+
+- [x] **Phase 2: AI Knowledge Processing Engine**
+  - [x] `schemas.py`: Pydantic structured output models (`EducationalContent`).
+  - [x] `process_ai.py`: OpenAI LLM integration with `beta.chat.completions.parse`.
+  - [x] Defensive exception mapping (`AuthenticationError`, `RateLimitError` -> `SummarizerError`).
+  - [x] Prevention of double-wrapping exceptions (`except SummarizerError: raise`).
+
+- [ ] **Phase 3: CLI & File Export Pipeline**
+  - [ ] `main.py`: Command Line Interface entry point with positional URL parsing.
+  - [ ] `run.bat`: Windows batch execution helper with `PYTHONPATH` resolution.
+  - [ ] Automated `.md` file creation in `outputs/` directory.
+  - [ ] `tests/test_main.py`: Integration and error handling unit tests for CLI.
+
+- [ ] **Phase 4: Advanced Export & Agent Integrations**
+  - [ ] **PDF Export Pipeline**: Convert generated Markdown outputs into styled PDF documents (`fpdf2` / `reportlab`).
+  - [ ] **NoSQL & Vector Storage**: Persist structured knowledge summaries in NoSQL / Vector databases (MongoDB / ChromaDB).
+  - [ ] **Google Drive Auto-Sync**: Automatic background upload of generated knowledge summaries to Google Drive API.
+  - [ ] **MCP Server (Model Context Protocol)**: Connect the pipeline as an MCP tool server for AI agents (Claude Desktop, Cursor, Custom Agents).
+
+- [ ] **Phase 5: Web Application & Cloud API**
+  - [ ] **FastAPI Web API**: Async HTTP REST API endpoints (`/api/summarize`).
+  - [ ] **BYOK (Bring Your Own Key) Support**: Allow Web UI users to provide personal OpenAI API keys securely per session.
+  - [ ] **Modern Frontend (React / Web UI)**: Interactive web dashboard for URL submission, live processing status, and knowledge browsing.

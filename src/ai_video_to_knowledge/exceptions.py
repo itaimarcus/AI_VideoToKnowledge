@@ -13,3 +13,8 @@ class ExtractorError(VideoToKnowledgeError):
 class TranscriptNotAvailableError(VideoToKnowledgeError):
     """Raised when a transcript cannot be retrieved for a video."""
     pass
+
+
+class SummarizerError(VideoToKnowledgeError):
+    """Raised when LLM summarization fails (API errors, missing keys, invalid input)."""
+    pass

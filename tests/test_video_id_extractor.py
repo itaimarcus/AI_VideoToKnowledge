@@ -53,5 +53,4 @@ def test_invalid_types_raise_type_error(invalid_type) -> None:
     """Ensures non-string inputs raise TypeError with expected message."""
     with pytest.raises(TypeError) as exc_info:
         extract_video_id(invalid_type)
-        
     assert "Expected string for URL" in str(exc_info.value)
