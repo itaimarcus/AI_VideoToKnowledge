@@ -1,3 +1,29 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ai-video-to-knowledge"
+version = "0.1.0"
+description = "Convert YouTube transcripts into structured Markdown knowledge notes via OpenAI"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "openai",
+    "youtube-transcript-api",
+    "pydantic",
+    "python-dotenv",
+]
+
+[project.scripts]
+yt-ai = "main:main"
+
+[tool.setuptools.packages.find]
+where = ["src", "."]
+
+[tool.setuptools]
+py-modules = ["main"]
+
 [tool.pytest.ini_options]
-pythonpath = ["src"]
+pythonpath = ["src", "."]
 testpaths = ["tests"]
